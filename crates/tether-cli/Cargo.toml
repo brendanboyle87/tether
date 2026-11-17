@@ -1,0 +1,25 @@
+[package]
+name = "tether-cli"
+description = "tether: run, replay, diff, eval, inspect, resume, verify, pack."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "tether"
+path = "src/main.rs"
+
+[dependencies]
+tether-types = { workspace = true }
+tether-trace = { workspace = true }
+tether-core = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[lints]
+workspace = true

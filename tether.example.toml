@@ -1,0 +1,25 @@
+# Example policy. Copy to tether.toml. Rules are evaluated top to bottom,
+# first match wins, default is "ask".
+
+[budget]
+max_tokens = 2_000_000
+max_usd = 5.00
+max_wall_secs = 2400
+max_tool_calls = 400
+
+# Seconds to wait for a human on "ask" before the run moves to Halted.
+ask_timeout_secs = 600
+
+[[rule]]
+match = { tool = "sandbox.write_file", path = "src/**" }
+action = "allow"
+
+[[rule]]
+match = { tool = "sandbox.exec", argv0 = ["rm", "git", "curl"] }
+action = "ask"
+# on_timeout = "deny"   # opt in for fire-and-forget jobs
+
+[[rule]]
+match = { tool = "net.*" }
+action = "deny"
+reason = "no network in this run"

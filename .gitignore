@@ -1,0 +1,10 @@
+/target
+**/*.rs.bk
+*.jsonl
+*.blobs/
+.env
+.DS_Store
+node_modules/
+__pycache__/
+*.egg-info/
+dist/
