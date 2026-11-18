@@ -32,3 +32,18 @@ fn unknown_event_type_is_ext() {
         other => panic!("expected Ext, got {other:?}"),
     }
 }
+
+#[test]
+fn payload_blob_reference_roundtrips_as_blob() {
+    let blob = Payload::Blob {
+        blob: "blake3:ab".into(),
+        bytes: 40_000,
+    };
+    let json = serde_json::to_string(&blob).expect("serialize");
+    assert_eq!(json, r#"{"blob":"blake3:ab","bytes":40000}"#);
+    let back: Payload = serde_json::from_str(&json).expect("deserialize");
+    assert_eq!(back, blob);
+
+    let inline: Payload = serde_json::from_str(r#"{"stdout":"ok"}"#).expect("deserialize");
+    assert_eq!(inline, Payload::Inline(serde_json::json!({"stdout": "ok"})));
+}

@@ -7,10 +7,19 @@ you the things frameworks leave out: a sandbox, hard budgets, a permission
 layer, and a trace of every model call, tool call and policy decision that you
 can replay, diff and eval against.
 
-> Status: pre-alpha, v0.1 "it records" in progress. Nothing here runs yet.
+> Status: pre-alpha, v0.1 "it records" in progress. A Rust agent linked against
+> `tether-core` can run with sandboxed tools and leave a verifiable trace, and
+> `tether inspect` and `tether verify` read it. `tether run`, the policy engine
+> and the SDKs are not built yet.
 > Read [docs/PLAN.md](docs/PLAN.md) for what ships when.
 
-<!-- demo GIF: agent misbehaves, Tether blocks it, trace shows why -->
+![A wrapped agent runs under Tether, then tether inspect prints its trace and tether verify checks it](docs/demo.gif)
+
+The [raw-loop example](examples/raw-loop) running under Tether with a scripted
+model and real sandboxed tools, then `tether inspect` and `tether verify` on
+the trace it left.
+
+<!-- v0.2: replace with agent misbehaves, Tether blocks it, trace shows why -->
 
 ## What it is, and is not
 

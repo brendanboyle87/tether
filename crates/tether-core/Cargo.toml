@@ -18,8 +18,13 @@ tokio = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+time = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+
+[[example]]
+name = "raw-loop"
+path = "../../examples/raw-loop/main.rs"
 
 [lints]
 workspace = true

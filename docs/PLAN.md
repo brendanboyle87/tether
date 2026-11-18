@@ -53,11 +53,11 @@ By the end of week two, one real agent produces one real trace that
 - [x] Repo under Apache 2.0, CI for fmt, clippy, tests, MSRV
 - [x] Workspace skeleton: nine crates, traits in place, `cargo check` clean
 - [x] Trace schema v0 written as a spec (`TRACE_FORMAT.md`) before the writer
-- [ ] `tether-trace` writer with BLAKE3 chain and blob spill; reader with verification
-- [ ] `fake` model adapter so tests need no API key
-- [ ] Core run loop driving one step: model request, tool call, policy decision, trace events
-- [ ] One end-to-end: wrap a 50-line agent, produce a trace, `tether inspect` it
-- [ ] README demo GIF placeholder replaced with the real thing
+- [x] `tether-trace` writer with BLAKE3 chain and blob spill; reader with verification
+- [x] `fake` model adapter so tests need no API key
+- [x] Core run loop driving one step: model request, tool call, policy decision, trace events
+- [x] One end-to-end: wrap a 50-line agent, produce a trace, `tether inspect` it
+- [x] README demo GIF placeholder replaced with the real thing
 
 ## Stack decisions
 

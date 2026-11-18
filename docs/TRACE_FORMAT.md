@@ -39,13 +39,24 @@ Example:
 
 `hash` is BLAKE3 over the canonical JSON encoding of the event with its own
 `hash` field replaced by the previous event's `hash` (empty string for
-`seq = 0`). Canonical means: keys in the order above, no whitespace, UTF-8.
-`tether verify` recomputes the chain and checks every referenced blob exists.
+`seq = 0`). Canonical means: keys in the order above, no whitespace, UTF-8. The trailing
+newline is not hashed.
+
+A verifier hashes the bytes of the line as written, swapping only the `hash`
+value, and does not re-serialize the event. A line that is not in canonical
+form therefore fails verification. `tether verify` recomputes the chain, then
+checks that every referenced blob exists and still matches its hash.
 
 ## Blobs
 
 A payload larger than 32 KB (`INLINE_LIMIT`) is written to the blob store and
-the event carries `{"blob":"blake3:<hex>","bytes":N}` in its place.
+the event carries `{"blob":"blake3:<hex>","bytes":N}` in its place. `bytes` is
+the size of the blob. A blob is opaque bytes; a JSON payload is stored as its
+compact JSON encoding.
+
+An inline payload that itself has the shape `{"blob": string, "bytes": integer}`
+would be indistinguishable from a reference, so a writer spills it to a blob
+whatever its size.
 
 Model message history is content-addressed **per message**: `model.request.data.messages`
 is a list of blob hashes, one per message. A step adds one new blob; the
@@ -79,7 +90,15 @@ For every tool call the trace contains, in this order and with the same
 `step`: `tool.call`, `policy.decision`, then `tool.result`. A `deny` still
 produces a `tool.result` with `is_error: true` and the reason.
 
+A call to a tool that was not listed in `run.created` is recorded the same
+way, with an empty `server` and a `deny` decision.
+
 For every model call: `model.request`, `policy.decision`, `model.response`.
+A denied model call, or one the provider fails, has no `model.response`; the
+next event is the `run.state` that halts the run.
+
+`step` is 0 for the events before the first model request. Each
+`model.request` opens the next step.
 
 ## Size limits
 
