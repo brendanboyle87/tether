@@ -10,6 +10,7 @@
 
 /// Clock reads go through this so replay can substitute recorded values.
 pub trait Clock: Send + Sync {
+    /// Milliseconds since the Unix epoch.
     fn now_ms(&self) -> u64;
 }
 
@@ -18,9 +19,23 @@ pub trait Rng: Send + Sync {
     fn seed(&self) -> u64;
 }
 
-pub mod run {
-    //! Run lifecycle and the state machine (`RunState`).
+/// The real wall clock. This is the boundary: nothing else in the core reads
+/// `std::time`.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SystemClock;
+
+impl Clock for SystemClock {
+    fn now_ms(&self) -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis() as u64)
+    }
 }
+
+pub mod run;
+mod trace_task;
+
+pub use run::{Run, RunConfig, RunDeps, RunError};
 
 pub mod checkpoint {
     //! `checkpoint` events every N steps; resume from the last one.

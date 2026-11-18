@@ -26,10 +26,15 @@ pub struct ToolResult {
     pub duration_ms: u64,
 }
 
-/// Either inline JSON or a reference into the content-addressed blob store.
+/// Either a reference into the content-addressed blob store or inline JSON.
+///
+/// `Blob` is listed first on purpose: the enum is untagged and `Inline` holds
+/// any JSON value, so it would otherwise swallow every blob reference on read.
+/// An inline value that itself has the shape of a blob reference would be
+/// ambiguous, so the trace writer always spills such a value to a blob.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Payload {
-    Inline(serde_json::Value),
     Blob { blob: String, bytes: u64 },
+    Inline(serde_json::Value),
 }

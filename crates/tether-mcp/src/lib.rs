@@ -44,10 +44,7 @@ pub mod registry {
     //! Merge tools from every server; route calls back to the owner.
 }
 
-pub mod sandbox_server {
-    //! Exposes `tether-sandbox` as an MCP server named `sandbox` with
-    //! `exec`, `read_file`, `write_file`, `list_dir`.
-}
+pub mod sandbox_server;
 
 #[cfg(feature = "minimal")]
 pub mod minimal {

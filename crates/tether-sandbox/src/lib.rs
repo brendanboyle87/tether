@@ -72,9 +72,7 @@ pub trait Sandbox: Send + Sync {
 }
 
 #[cfg(feature = "process")]
-pub mod process {
-    //! Default backend: rlimits, seccomp (Linux), cwd jail, env scrub.
-}
+pub mod process;
 
 #[cfg(feature = "docker")]
 pub mod docker {

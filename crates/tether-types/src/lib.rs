@@ -18,4 +18,4 @@ pub mod tool;
 pub use event::{Event, EventType, RunId, RunState, SCHEMA_VERSION};
 pub use model::{ModelRequest, ModelResponse, Usage};
 pub use policy::{BudgetSnapshot, Decision};
-pub use tool::{ToolCall, ToolResult};
+pub use tool::{Payload, ToolCall, ToolResult};

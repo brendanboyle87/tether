@@ -32,8 +32,18 @@ pub enum TraceError {
         expected: String,
         found: String,
     },
+    #[error("seq gap: expected {expected}, found {found}")]
+    SeqGap { expected: u64, found: u64 },
+    #[error("line {line} is not a valid event: {reason}")]
+    Malformed { line: u64, reason: String },
+    #[error("event {seq} has schema version {v}; this build reads version {supported}")]
+    UnsupportedVersion { seq: u64, v: u8, supported: u8 },
     #[error("missing blob {0}")]
     MissingBlob(String),
+    #[error("blob {expected} is corrupt: content hashes to {found}")]
+    BlobCorrupt { expected: String, found: String },
+    #[error("not a blob hash: {0:?}")]
+    InvalidBlobHash(String),
     #[error("event {seq} is {bytes} bytes, over the {limit} byte cap")]
     EventTooLarge {
         seq: u64,
@@ -42,17 +52,16 @@ pub enum TraceError {
     },
 }
 
-pub mod blob {
-    //! Content-addressed blob store. Keyed by `blake3:<hex>`.
-}
+pub type Result<T> = std::result::Result<T, TraceError>;
 
-pub mod writer {
-    //! Append-only JSONL writer owning the hash chain.
-}
+pub mod blob;
+mod chain;
+pub mod reader;
+pub mod writer;
 
-pub mod reader {
-    //! Streaming reader with chain verification.
-}
+pub use blob::BlobStore;
+pub use reader::{verify, TraceReader, VerifyReport};
+pub use writer::{NewEvent, TraceWriter};
 
 pub mod diff {
     //! Align two traces by step and report the first divergence.

@@ -48,6 +48,7 @@ Rules in `tether.toml`, evaluated top to bottom, first match wins, default
 ```rust
 pub trait Policy: Send + Sync {
     fn decide(&self, call: &ToolCall, ctx: &RunCtx) -> Decision;
+    fn decide_model(&self, req: &ModelRequest, ctx: &RunCtx) -> Decision; // default: allow
 }
 pub enum Decision { Allow, Deny { reason: String }, Ask { prompt: String } }
 ```
@@ -83,6 +84,12 @@ pub trait Sandbox: Send + Sync {
 | `docker` | v0.2 | Filesystem, network namespace, resource limits; snapshot via `commit` | Kernel (shared) |
 | `firecracker` | v1.0 | Kernel, memory, devices; VM snapshot | Side channels, hypervisor bugs |
 
+Status of `process` today: commands start in the workspace with a cleared
+environment (only `PATH` passes through), `read` and `write` refuse paths that
+leave the workspace, and a command past the time limit is killed. rlimits and
+the seccomp filter are not implemented yet, and the network, CPU and memory
+settings are ignored.
+
 Backends that cannot snapshot return `Unsupported`; resume then replays writes
 from the trace into a fresh sandbox.
 
@@ -105,7 +112,7 @@ hand-rolled client is the fallback if `rmcp` blocks stdio or streamable HTTP.
 #[async_trait]
 pub trait ModelAdapter: Send + Sync {
     fn id(&self) -> &str;
-    async fn complete(&self, req: ModelRequest) -> Result<ModelResponse>;
+    async fn complete(&self, req: CompletionRequest) -> Result<Completion>;
     fn price(&self, usage: &Usage) -> Option<Money>;
 }
 ```
@@ -117,6 +124,11 @@ pub trait ModelAdapter: Send + Sync {
 | `ollama` | after v0.4 | Local; `price` returns `None` |
 | `replay` | v0.3 | Reads `model.response` events from a trace |
 | `fake` | v0.1 | Scripted responses for tests; no API key |
+
+Adapters see message content in full and know nothing about the trace:
+`CompletionRequest` and `Completion` carry real messages, and `tether-core`
+turns them into `model.request` and `model.response` events by storing each
+message as a blob. Latency is measured by the core through `Clock`.
 
 Tether never modifies prompts. `model.request` records Tether's form;
 `model.response` records Tether's form plus the raw provider body as a blob.
