@@ -67,9 +67,11 @@ cargo test --workspace
 
 ## Honest note on sandboxing
 
-The default `process` backend is rlimits, a seccomp filter and a cwd jail. It
-is not a security boundary and we will never describe it as one. Use `docker`
-(v0.2) for namespaces and `firecracker` (v1.0) for a separate kernel.
+The default `process` backend today is a cwd jail, an env scrub and a time
+limit: commands run as plain child processes and can reach anything the user
+running Tether can. rlimits and a seccomp filter land in v0.2. None of that is
+a security boundary and we will never describe it as one. Use `docker` (v0.2)
+for namespaces and `firecracker` (v1.0) for a separate kernel.
 
 ## License
 

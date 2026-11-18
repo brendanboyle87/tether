@@ -76,5 +76,7 @@ Dependencies point down only. Leaf crates never import each other or
 
 ## Current phase
 
-**v0.1 "it records"** (weeks 1 to 4). Goal: wrap a toy agent, produce a full
-trace, `tether inspect` reads it. Week-one checklist is in `docs/PLAN.md`.
+**v0.2 "it refuses"** (weeks 5 to 8). v0.1 shipped 2026-11-18. Goal: the agent
+asks to run `rm -rf`, policy blocks it, `tether inspect` shows the decision and
+the rule that matched. The ordered checklist is in `docs/PLAN.md`; work it top
+to bottom, one PR per item.
