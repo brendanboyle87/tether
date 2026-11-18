@@ -17,7 +17,7 @@ version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/chizy7/tether"
-rust-version = "1.80"
+rust-version = "1.89"
 
 [workspace.dependencies]
 # Shared types
@@ -32,10 +32,10 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "fs", 
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 clap = { version = "4", features = ["derive"] }
-toml = "0.8"
-rusqlite = { version = "0.32", features = ["bundled"] }
-tonic = "0.12"
-prost = "0.13"
+toml = "1"
+rusqlite = { version = "0.43", features = ["bundled"] }
+tonic = "0.14"
+prost = "0.14"
 
 # Internal crates
 tether-types = { path = "crates/tether-types" }
