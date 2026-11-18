@@ -1,0 +1,26 @@
+[package]
+name = "tether-mcp"
+description = "MCP client, tool registry and the built-in sandbox MCP server."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+tether-types = { workspace = true }
+tether-sandbox = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+# rmcp = { version = "*", optional = true }   # enable once the client API is checked (week 1)
+
+[features]
+default = []
+# rmcp = ["dep:rmcp"]
+minimal = []
+
+[lints]
+workspace = true
