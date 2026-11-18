@@ -59,6 +59,24 @@ By the end of week two, one real agent produces one real trace that
 - [x] One end-to-end: wrap a 50-line agent, produce a trace, `tether inspect` it
 - [x] README demo GIF placeholder replaced with the real thing
 
+v0.1 shipped 2026-11-18: 19-event trace from the raw-loop example, `verify` passes, 36 tests.
+
+## v0.2 checklist: it refuses
+
+Demo that closes the phase: the agent asks to run `rm -rf`, policy blocks it,
+`tether inspect` shows the `policy.decision` with the rule that matched. Work
+in this order; each item is one PR.
+
+- [ ] TOML rule engine in `tether-policy`: `[[rule]]` tables, `match` on tool name, `argv0` and `path` globs, first match wins, default `ask`; the matched rule's name goes into `policy.decision.rule`
+- [ ] Policy snapshot (full TOML) recorded in `run.created.policy`, replacing the `null`
+- [ ] Budget enforcement: check tokens, usd, wall clock and tool calls before every model and tool call; emit `budget.tick` after each; a tripped budget halts with `run.state` reason naming the budget
+- [ ] `ask` answered from the CLI prompt in `tether run`; `ask_timeout_secs` (default 600) moves the run to Halted; `on_timeout = "deny"` per rule
+- [ ] Kill switch: `<run>.halt` file watch plus SIGINT, both halt at the next event boundary, never mid-write
+- [ ] `process` backend: rlimits (cpu, memory, open files) and the Linux seccomp filter; then make the README's sandbox paragraph true
+- [ ] `docker` backend behind the `docker` feature: workspace mount, network namespace per `SandboxSpec.network`, snapshot via `commit`
+- [ ] Demo: `examples/refuses` with a scripted `fake` run that attempts `rm -rf`; GIF of the blocked call in `inspect`
+- [ ] Write down for v0.3: `latency_ms` and `duration_ms` come from live clock reads, so replay must restore them from the recorded events or `diff` flags every event
+
 ## Stack decisions
 
 | Layer | Choice | Why |
