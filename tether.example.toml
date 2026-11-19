@@ -10,16 +10,24 @@ max_tool_calls = 400
 # Seconds to wait for a human on "ask" before the run moves to Halted.
 ask_timeout_secs = 600
 
+# A rule matches when every key in its `match` does. `tool` is the qualified
+# name, <server>.<tool>; `argv0` is the command's file name; `path` is the
+# call's `path` argument. Each takes a glob or a list of globs. `name` is what
+# the trace records in policy.decision.rule; left out, it is "rule-N".
+
 [[rule]]
+name = "write-src"
 match = { tool = "sandbox.write_file", path = "src/**" }
 action = "allow"
 
 [[rule]]
+name = "risky-commands"
 match = { tool = "sandbox.exec", argv0 = ["rm", "git", "curl"] }
 action = "ask"
 # on_timeout = "deny"   # opt in for fire-and-forget jobs
 
 [[rule]]
+name = "no-network"
 match = { tool = "net.*" }
 action = "deny"
 reason = "no network in this run"

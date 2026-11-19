@@ -47,11 +47,38 @@ Rules in `tether.toml`, evaluated top to bottom, first match wins, default
 
 ```rust
 pub trait Policy: Send + Sync {
-    fn decide(&self, call: &ToolCall, ctx: &RunCtx) -> Decision;
-    fn decide_model(&self, req: &ModelRequest, ctx: &RunCtx) -> Decision; // default: allow
+    fn decide(&self, call: &ToolCall, ctx: &RunCtx) -> Verdict;
+    fn decide_model(&self, req: &ModelRequest, ctx: &RunCtx) -> Verdict; // default: allow
 }
+pub struct Verdict { decision: Decision, rule: Option<String> }
 pub enum Decision { Allow, Deny { reason: String }, Ask { prompt: String } }
 ```
+
+`RulePolicy` is the `[[rule]]` tables of `tether.toml` as a `Policy`:
+
+```toml
+[[rule]]
+name = "no-rm"                                  # optional; default "rule-N" by position
+match = { tool = "sandbox.exec", argv0 = "rm" } # every key given must match
+action = "deny"                                 # allow | deny | ask
+reason = "deleting files is off limits"
+```
+
+| `match` key | Matched against |
+| --- | --- |
+| `tool` | The qualified name `<server>.<tool>`, so the built-in tools are `sandbox.exec`, `sandbox.write_file` and so on |
+| `argv0` | The file name of `arguments.argv[0]`: `rm`, `/bin/rm` and `./rm` are all `rm` |
+| `path` | `arguments.path` with `.` and `..` resolved; a path that climbs out of where it started matches nothing |
+
+Each key takes one glob or a list. `*` and `?` stay within one path segment,
+`**` crosses `/`. A key left out matches anything, so a rule with no `match`
+is a catch-all. The matched rule's name is recorded in `policy.decision.rule`;
+a call no rule matches is an `ask` with `rule` null. Unknown keys, duplicate
+names and empty patterns are load errors, so a typo cannot quietly widen a
+rule.
+
+Rules match what a call says, not what it will do: `argv0 = "rm"` does not see
+`sh -c "rm -rf ."`. Deny by default and allow narrowly where that matters.
 
 `Ask` suspends the run and emits `policy.ask`. The answer comes from the CLI
 prompt, the SDK `Answer` RPC, or, unattended, a timeout (default 600 s) that

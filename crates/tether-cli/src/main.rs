@@ -133,14 +133,24 @@ fn describe(event: &Event) -> (&str, String) {
             )
         }
         EventType::PolicyDecision {
-            subject, decision, ..
+            subject,
+            decision,
+            rule,
+            ..
         } => {
             let outcome = match decision {
                 Decision::Allow => "allow".to_owned(),
                 Decision::Deny { reason } => format!("deny: {reason}"),
                 Decision::Ask { prompt } => format!("ask: {prompt}"),
             };
-            ("policy.decision", format!("{outcome} (seq {subject})"))
+            let rule = match rule {
+                Some(name) => format!("rule {name}"),
+                None => "no rule".to_owned(),
+            };
+            (
+                "policy.decision",
+                format!("{outcome} (seq {subject}, {rule})"),
+            )
         }
         EventType::PolicyAsk { subject, prompt } => {
             ("policy.ask", format!("{prompt} (seq {subject})"))

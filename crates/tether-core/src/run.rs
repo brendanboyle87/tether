@@ -11,7 +11,7 @@ use std::sync::Arc;
 use serde_json::json;
 use tether_mcp::{McpClient, McpError, ToolSpec};
 use tether_models::{Block, Completion, CompletionRequest, ModelAdapter, ModelError};
-use tether_policy::{Policy, RunCtx};
+use tether_policy::{Policy, RunCtx, Verdict};
 use tether_trace::{NewEvent, TraceError, TraceWriter};
 use tether_types::{
     BudgetSnapshot, Decision, Event, EventType, ModelRequest, ModelResponse, Payload, RunId,
@@ -83,7 +83,6 @@ impl Run {
         let created = json!({
             "agent": run.agent,
             "model": { "provider": run.deps.model.id() },
-            // The rule engine and sandbox selection land in v0.2.
             "policy": null,
             "sandbox": null,
             "tools": run.tools.iter().map(|t| json!({
@@ -136,9 +135,9 @@ impl Run {
             .emit(None, EventType::ModelRequest(request.clone()))
             .await?;
 
-        let decision = self.deps.policy.decide_model(&request, &self.ctx());
-        self.record_decision(asked.seq, decision.clone()).await?;
-        match decision {
+        let verdict = self.deps.policy.decide_model(&request, &self.ctx());
+        self.record_decision(asked.seq, verdict.clone()).await?;
+        match verdict.decision {
             Decision::Allow => {}
             Decision::Deny { reason } => {
                 return Err(self.halt(format!("model call denied: {reason}")).await);
@@ -209,14 +208,15 @@ impl Run {
         let (call, known) = self.resolve(id, name, arguments);
         let asked = self.emit(None, EventType::ToolCall(call.clone())).await?;
 
-        let decision = if known {
+        let verdict = if known {
             self.deps.policy.decide(&call, &self.ctx())
         } else {
             Decision::Deny {
                 reason: format!("unknown tool {name:?}"),
             }
+            .into()
         };
-        self.record_decision(asked.seq, decision.clone()).await?;
+        self.record_decision(asked.seq, verdict.clone()).await?;
 
         let failed = |text: String| ToolResult {
             id: call.id.clone(),
@@ -224,7 +224,7 @@ impl Run {
             is_error: true,
             duration_ms: 0,
         };
-        let result = match decision {
+        let result = match verdict.decision {
             Decision::Allow => {
                 self.budget.tool_calls_used += 1;
                 let sent_ms = self.deps.clock.now_ms();
@@ -311,13 +311,12 @@ impl Run {
         Ok(self.trace.append(event).await?)
     }
 
-    async fn record_decision(&mut self, subject: u64, decision: Decision) -> Result<(), RunError> {
+    async fn record_decision(&mut self, subject: u64, verdict: Verdict) -> Result<(), RunError> {
         self.tick_wall();
         let body = EventType::PolicyDecision {
             subject,
-            // Rule names arrive with the rule engine in v0.2.
-            rule: None,
-            decision,
+            rule: verdict.rule,
+            decision: verdict.decision,
             budget: self.budget,
         };
         self.emit(Some(subject), body).await?;
