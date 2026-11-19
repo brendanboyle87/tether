@@ -74,7 +74,7 @@ history is never copied.
 | `model.response` | `message` (blob hash), `tool_calls`, usage, `latency_ms`, `ttft_ms`, `stream`, `provider_request_id`, `raw` (blob hash) |
 | `tool.call` | id, name, server, arguments, `external` |
 | `tool.result` | id, content (inline or blob), `is_error`, `duration_ms` |
-| `policy.decision` | `subject` seq, rule, `{outcome: allow \| deny \| ask, ...}`, budget snapshot |
+| `policy.decision` | `subject` seq, `rule` (name of the rule that matched, null when none did), `decision` `{outcome: allow \| deny \| ask, ...}`, budget snapshot |
 | `policy.ask` | `subject`, prompt |
 | `policy.answer` | `subject`, `answered_by`, `allow` |
 | `sandbox.exec` | command, cwd, env hash |

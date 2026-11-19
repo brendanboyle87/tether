@@ -9,7 +9,7 @@ use tether_core::{Clock, Run, RunConfig, RunDeps, RunError};
 use tether_mcp::{McpClient, McpError, ToolSpec};
 use tether_models::fake::FakeAdapter;
 use tether_models::{Completion, CompletionRequest, Message, Role};
-use tether_policy::{AllowAll, Policy, RunCtx};
+use tether_policy::{AllowAll, Policy, RulePolicy, RunCtx, Verdict};
 use tether_trace::{verify, TraceReader};
 use tether_types::{
     Decision, Event, EventType, Payload, RunId, RunState, ToolCall, ToolResult, Usage,
@@ -62,20 +62,22 @@ impl McpClient for EchoTools {
 struct DenyTools;
 
 impl Policy for DenyTools {
-    fn decide(&self, _call: &ToolCall, _ctx: &RunCtx) -> Decision {
+    fn decide(&self, _call: &ToolCall, _ctx: &RunCtx) -> Verdict {
         Decision::Deny {
             reason: "no tools in this run".into(),
         }
+        .into()
     }
 }
 
 struct AskTools;
 
 impl Policy for AskTools {
-    fn decide(&self, _call: &ToolCall, _ctx: &RunCtx) -> Decision {
+    fn decide(&self, _call: &ToolCall, _ctx: &RunCtx) -> Verdict {
         Decision::Ask {
             prompt: "run echo?".into(),
         }
+        .into()
     }
 }
 
@@ -315,4 +317,39 @@ async fn model_error_halts_the_run() {
         .expect_err("script is exhausted");
     assert!(matches!(err, RunError::Model(_)));
     assert_eq!(run.state(), RunState::Halted);
+}
+
+#[tokio::test]
+async fn matched_rule_name_is_recorded_in_the_decision() {
+    let path = trace_path("rule_name");
+    let tools = Arc::new(EchoTools::default());
+    let policy = RulePolicy::from_toml(
+        r#"
+        [[rule]]
+        name = "no-echo"
+        match = { tool = "sandbox.echo" }
+        action = "deny"
+        reason = "echo is off limits"
+        "#,
+    )
+    .expect("policy");
+    let result = one_tool_run(&path, tools.clone(), Arc::new(policy)).await;
+
+    assert!(result.is_error);
+    assert_eq!(
+        result.content,
+        Payload::Inline(json!("denied by policy: echo is off limits"))
+    );
+    assert_eq!(tools.calls.load(Ordering::SeqCst), 0);
+
+    let events = read(&path);
+    let rules: Vec<Option<String>> = events
+        .iter()
+        .filter_map(|e| match &e.body {
+            EventType::PolicyDecision { rule, .. } => Some(rule.clone()),
+            _ => None,
+        })
+        .collect();
+    // Model calls match no rule; the tool call names the rule that denied it.
+    assert_eq!(rules, [None, Some("no-echo".to_owned()), None]);
 }
