@@ -174,13 +174,13 @@ Not in scope, ever: prompt templates, RAG, memory, agent-builder UIs.
 
 ## Status
 
-Pre-alpha, with one maintainer. The latest release is 0.4.0.
+Pre-alpha. The latest release is 0.5.0.
 
 The trace format is frozen at v0: a trace written today will be readable by
 later versions. The command line and the SDKs may still change between minor
 versions. [CHANGELOG.md](CHANGELOG.md) lists what changed in each release and
-[docs/PLAN.md](docs/PLAN.md) what ships when. What comes after 0.4 is on the
-[roadmap](https://github.com/users/chizy7/projects/8).
+[docs/PLAN.md](docs/PLAN.md) the phases it was built in. What comes next is
+on the [roadmap](https://github.com/users/chizy7/projects/8).
 
 ## More
 
@@ -188,6 +188,13 @@ versions. [CHANGELOG.md](CHANGELOG.md) lists what changed in each release and
 policy refused the `rm`:
 
 ![The trace viewer open on the failed run, at the step where policy refused the rm](docs/media/evals-ui.jpg)
+
+The [MCP example](examples/mcp-filesystem): a real model with the sandbox's
+tools and an external MCP server's in one list. It writes with the sandbox,
+reads through the server, and is refused when it tries to write through the
+server. The replay then answers from the recording and starts no server.
+
+![tether tools lists the sandbox tools and an MCP filesystem server's; a real model's write through the server is denied by a rule; the replay does not diverge](docs/media/mcp.gif)
 
 The [refuses example](examples/refuses): an agent tries `rm -rf .`, the
 `no-rm` rule denies it, and `tether inspect` shows the call, the decision and

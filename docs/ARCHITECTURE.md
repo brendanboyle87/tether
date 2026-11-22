@@ -69,16 +69,27 @@ reason = "deleting files is off limits"
 
 | `match` key | Matched against |
 | --- | --- |
-| `tool` | The qualified name `<server>.<tool>`, so the built-in tools are `sandbox.exec`, `sandbox.write_file` and so on |
+| `tool` | The qualified name `<server>.<tool>`, so the built-in tools are `sandbox.exec`, `sandbox.write_file` and so on. Matched as a name: `*` covers a `/` too |
 | `argv0` | The file name of `arguments.argv[0]`: `rm`, `/bin/rm` and `./rm` are all `rm` |
-| `path` | `arguments.path` with `.` and `..` resolved; a path that climbs out of where it started matches nothing |
+| `path` | `arguments.path` with `.` and `..` resolved. A path that climbs out of where it started matches every `deny` and `ask` with a `path`, and no `allow` |
+| `server` | The id of the server that owns the tool, matched as a name |
 
 Each key takes one glob or a list. `*` and `?` stay within one path segment,
 `**` crosses `/`. A key left out matches anything, so a rule with no `match`
 is a catch-all. The matched rule's name is recorded in `policy.decision.rule`;
 a call no rule matches is an `ask` with `rule` null. Unknown keys, duplicate
-names and empty patterns are load errors, so a typo cannot quietly widen a
-rule.
+names, empty patterns and patterns over 1024 characters are load errors, so a
+typo cannot quietly widen a rule.
+
+A `deny` or an `ask` matches `argv0` and `path` without regard to letter
+case, because many filesystems resolve names that way and `SECRETS/` would
+otherwise walk past a deny on `secrets/**`. An `allow` matches as written.
+Matching is a table over pattern and text, linear in each, with no
+backtracking: the text is the agent's and the pattern may come from a trace.
+
+The built-in tools take their arguments as a JSON object and nothing else.
+A list would be read into the same fields by position, with no `argv` or
+`path` for a rule to match on.
 
 Rules match what a call says, not what it will do: `argv0 = "rm"` does not see
 `sh -c "rm -rf ."`. Deny by default and allow narrowly where that matters.
@@ -167,7 +178,8 @@ What `process` does, by platform:
 | `Network::Allowlist` | refused at `start` | refused at `start` |
 
 The seccomp filter is a deny list returning `EPERM`: tracing and reading
-other processes, mounts and `chroot`, namespaces, kernel modules, `reboot`,
+other processes, mounts and `chroot`, `unshare` and `setns` (namespaces made
+through `clone` flags are not covered), kernel modules, `reboot`,
 `bpf`, `perf_event_open`, keyrings, setting the clock, and `io_uring`.
 Everything else is allowed, so ordinary build and test commands run
 unchanged. `memory_bytes` caps address space, not resident memory, so
@@ -213,7 +225,7 @@ which holds any number of the other two and is what the run talks to.
 At run start every `[[mcp_server]]` in the policy is connected: `initialize`,
 a check that the negotiated protocol version is one this build supports,
 `tools/list`. The registry merges the lists, built-in server first; a name
-that collides is exposed as `<server>.<tool>` for the later server, so the
+that collides is exposed as `<server>__<tool>` for the later server, so the
 sandbox keeps its bare names. The merged list goes into `run.created.tools`
 with the owning server on each entry, and `run.created.mcp_servers` records
 each server's transport, negotiated protocol version and reported name.
@@ -223,19 +235,39 @@ decision, dispatch to the owning server under its own name for the tool,
 `tool.result`. A deny produces a `tool.result` with `is_error = true`. A call
 past the server's `timeout_secs`, a JSON-RPC error, and a tool the server
 does not have all come back the same way; none of them halts the run. Rules
-see every tool as `<server>.<tool>` and may match on `server` alone.
+see every tool as `<server>.<tool>`, whichever name the agent called it by,
+and may match on `server` alone.
 
-Stdio servers are child processes with a scrubbed environment: only the
-variables the policy's `env` list names reach them (plus `PATH` when the list
-is empty). They stop when the run finishes or halts. Every external tool is
-`external = true`, so replay returns the recorded result and connects to
-nothing; `tether replay` of a trace with external calls starts no server.
+Stdio servers are child processes with a scrubbed environment: `PATH`, so
+the server can find its interpreter, and the variables the policy's `env`
+list names. Nothing else reaches them. They stop when the run finishes or
+halts. `timeout_secs` bounds the `initialize` handshake as well as each call,
+so a server that never answers fails the run at start and does not hang it.
 
-`rmcp` was checked against its actual client API before this was built
-(3.11: `client`, `transport-child-process`,
-`transport-streamable-http-client-reqwest`), which is what the v0.1 note said
-to do and nobody did until v0.5. It sits behind the `rmcp` cargo feature,
-on by default; a build without it refuses any `[[mcp_server]]` with a clear
+An HTTP server's `headers` are sent with every request. The policy file is
+recorded whole in `run.created.policy`, so a token must not be written in
+it: a header value takes `${NAME}`, filled in from Tether's environment when
+the server is connected, and a name that is not set fails the connect.
+
+Every external tool is `external = true`, so replay returns the recorded
+result and connects to nothing; `tether replay` of a trace with external
+calls starts no server. The paths that go live are different. `tether resume`
+connects the servers the recorded policy names before it carries on, and a
+replay with `--live-after-divergence` (so `tether eval --system` too)
+connects them at the moment it leaves the recording, not before. Neither
+makes an external call a second time.
+
+Those servers come out of the trace, and a trace can come from anyone: its
+recorded policy could name any command. So the live paths start a server
+only if it is in a `--policy` file the user passed, or the user passed
+`--trust-recorded-servers`, and they print what each server runs or
+connects to first. Otherwise `resume` refuses, and a live replay or eval
+carries on without them: a call to one of their tools comes back as a
+failed call that says why.
+
+The client is `rmcp` 3.11 (`client`, `transport-child-process`,
+`transport-streamable-http-client-reqwest`). It sits behind the `rmcp` cargo
+feature, on by default; a build without it refuses any `[[mcp_server]]` with a clear
 error. Tether ships no tools beyond the sandbox server.
 
 ## Model adapters
@@ -253,7 +285,6 @@ pub trait ModelAdapter: Send + Sync {
 | --- | --- | --- |
 | `anthropic` | v0.3 | Messages API over HTTP, tool use; streaming collapsed to one event with `ttft_ms`; key from `ANTHROPIC_API_KEY` |
 | `openai_compat` | v0.3 | Chat Completions shape over HTTP, for OpenAI and the servers that copy its endpoint; server from `OPENAI_BASE_URL`, key from `OPENAI_API_KEY`; cargo feature `openai_compat` |
-| `ollama` | after v0.4 | Local; `price` returns `None` |
 | replay | v0.3 | Not in `tether-models`: the stand-in built by `tether-core::replay`, which returns recorded `model.response` events |
 | `fake` | v0.1 | Scripted responses for tests; no API key |
 
@@ -341,10 +372,11 @@ named in `TETHER_PRICING`; it replaces the built-in table whole. Two things are 
 one-hour cache writes are priced as five-minute ones, and Claude Haiku 5.5's
 higher rate for prompts over 100K tokens is not modelled.
 
-Tool names go to the provider as they are. The API accepts only letters,
-digits, `_` and `-`, so a tool name that the registry prefixed with its
-server on a collision (`github.create_issue`) would be rejected; the built-in
-sandbox tools are unaffected.
+Tool names go to the provider as they are. The APIs accept only letters,
+digits, `_` and `-`, which is why the registry prefixes a colliding name with
+two underscores (`github__create_issue`) and not a dot. A server whose own
+tool names use other characters is not renamed, and the provider will reject
+the request.
 
 ## Checkpoint, resume, replay
 
@@ -830,10 +862,18 @@ One thing every client over a Unix socket must do: name an HTTP/2 authority.
 gRPC clients default to sending the socket's path, which the daemon's HTTP
 stack rejects. The SDK sets `localhost`.
 
-Limits today: the daemon has only the `process` sandbox; a run whose client
-disappears without `Finish` or `Halt` stays in progress and keeps the daemon
-up; and an ask from a run with no rules waits its full timeout unless
-something calls `Answer`.
+An agent that crashes or is killed never says so; it just stops calling. The
+daemon halts a run that has had no call from its agent for
+`idle_timeout_secs` (in `[budget]`, default 600, 0 for never), with the
+reason `kill switch: no call from the agent for N s`. The halt is in the
+trace, the run's MCP servers are stopped, the run can be resumed, and with
+nothing left in progress the daemon goes on to exit when idle. A call in
+flight is not idleness, however long the model or the tool takes: the clock
+runs only between calls. An agent that works by itself for longer than the
+limit between calls needs a larger one.
+
+Limits today: the daemon has only the `process` sandbox, and an ask from a
+run with no rules waits its full timeout unless something calls `Answer`.
 
 ## Crate graph
 
@@ -857,9 +897,9 @@ Dependencies point down only. Leaf crates never import each other or
 
 | Question | Decision | Escape hatch |
 | --- | --- | --- |
-| Streaming | One collapsed `model.response` with `stream: true`, `ttft_ms` | `--record-deltas` writes raw deltas to a blob |
+| Streaming | One collapsed `model.response` with `stream: true`, `ttft_ms` | None built. Writing the raw deltas to a blob is the way, if they are ever wanted |
 | Blob storage | Hybrid: inline under 32 KB, content-addressed sidecar per message | `tether pack` for one-file portability |
 | Multi-agent | One trace per run, `agent` field, single writer task | Separate process gets its own run id plus `run.child` |
 | Unattended `ask` | 600 s timeout, then Halted (resumable) | `on_timeout = "deny"` per rule |
-| MCP client | `rmcp` behind the trait, cargo feature | `minimal` hand-rolled client |
-| Hash chain | Keep; BLAKE3 in the writer task | `--no-chain` for throwaway runs; `tether verify` reports it |
+| MCP client | `rmcp` behind the trait, cargo feature | The trait: another client can go behind it |
+| Hash chain | Keep; BLAKE3 in the writer task | None: every trace is chained |

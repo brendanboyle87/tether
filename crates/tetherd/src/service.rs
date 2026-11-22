@@ -41,6 +41,18 @@ struct Activity {
     idle_since: Mutex<Instant>,
 }
 
+/// The activity `create_run` begins, ended again if the call returns
+/// without having made a run.
+struct Starting<'a>(&'a Activity, bool);
+
+impl Drop for Starting<'_> {
+    fn drop(&mut self) {
+        if self.1 {
+            self.0.end();
+        }
+    }
+}
+
 impl Activity {
     fn begin(&self) {
         self.busy.fetch_add(1, Ordering::SeqCst);
@@ -87,6 +99,27 @@ struct Entry {
     asks: Arc<Asks>,
     /// True until the run finishes or halts.
     in_progress: AtomicBool,
+    /// When the agent last made a call on this run, or one returned.
+    last_call: Mutex<Instant>,
+    /// How long the run may go without one before it is halted.
+    idle_timeout: Option<Duration>,
+}
+
+impl Entry {
+    /// Note a call on the run now, and again when the returned guard is
+    /// dropped: a long model call or tool call is not idleness.
+    fn touch(self: &Arc<Self>) -> Touch {
+        *lock(&self.last_call) = Instant::now();
+        Touch(Arc::clone(self))
+    }
+}
+
+struct Touch(Arc<Entry>);
+
+impl Drop for Touch {
+    fn drop(&mut self) {
+        *lock(&self.0.last_call) = Instant::now();
+    }
 }
 
 struct Inner {
@@ -127,6 +160,48 @@ fn run_error(e: RunError) -> Status {
     }
 }
 
+impl Inner {
+    /// Halt the runs whose agents have gone quiet for longer than they are
+    /// allowed.
+    ///
+    /// An agent that crashed, or was killed, never says so: it just makes no
+    /// more calls. Its run would otherwise stay in progress for ever, with
+    /// the daemon, its sandbox and its MCP servers kept alive for nobody.
+    /// Halting it writes why to the trace, lets go of the servers, and
+    /// leaves the run resumable.
+    async fn halt_abandoned(&self) {
+        let quiet: Vec<Arc<Entry>> = lock(&self.runs)
+            .values()
+            .filter(|entry| entry.in_progress.load(Ordering::SeqCst))
+            .filter(|entry| {
+                entry
+                    .idle_timeout
+                    .is_some_and(|limit| lock(&entry.last_call).elapsed() >= limit)
+            })
+            .cloned()
+            .collect();
+        for entry in quiet {
+            // A call in flight holds the run: that is work, not idleness.
+            let Ok(mut guard) = entry.run.try_lock() else {
+                continue;
+            };
+            let Some(run) = guard.as_mut() else { continue };
+            if !matches!(run.state(), RunState::Running | RunState::Suspended) {
+                continue;
+            }
+            let secs = entry.idle_timeout.map_or(0, |limit| limit.as_secs());
+            let reason = format!("kill switch: no call from the agent for {secs} s");
+            entry.kill.trip(&reason);
+            if let Err(e) = run.halt_as_recorded(&reason, false).await {
+                tracing::warn!("halting an abandoned run: {e}");
+            }
+            if entry.in_progress.swap(false, Ordering::SeqCst) {
+                self.activity.end();
+            }
+        }
+    }
+}
+
 impl Daemon {
     pub(crate) fn new() -> Self {
         Self {
@@ -147,6 +222,7 @@ impl Daemon {
         async move {
             loop {
                 tokio::time::sleep(Duration::from_millis(100)).await;
+                inner.halt_abandoned().await;
                 if inner.activity.idle().is_some_and(|quiet| quiet >= idle) {
                     return;
                 }
@@ -170,7 +246,9 @@ impl Daemon {
 
     /// Turn a failed call into a status, noting the run's end if it halted.
     fn failed(&self, entry: &Entry, run: &Run, e: RunError) -> Status {
-        if run.state() != RunState::Running {
+        // A run whose trace cannot be written is over as well: nothing more
+        // can be recorded, so nothing more will be done.
+        if run.state() != RunState::Running || matches!(e, RunError::Trace(_)) {
             self.ended(entry);
         }
         run_error(e)
@@ -216,6 +294,11 @@ impl Tether for Daemon {
         request: Request<proto::CreateRunRequest>,
     ) -> Result<Response<proto::Run>, Status> {
         let req = request.into_inner();
+        // Starting a run is activity from its first moment. Connecting an
+        // MCP server can take longer than the idle time, and the daemon must
+        // not decide it is idle and leave while a run is being made.
+        self.inner.activity.begin();
+        let mut starting = Starting(&self.inner.activity, true);
         match req.sandbox.as_str() {
             "" | "process" => {}
             other => {
@@ -266,6 +349,7 @@ impl Tether for Daemon {
         let builtin: Arc<dyn McpClient> =
             Arc::new(SandboxServer::new(sandbox.clone(), handle.clone()));
         let servers = tools::server_configs(&policy.config().mcp_servers);
+        let idle_timeout = policy.config().budget.idle_timeout();
         let registry = tools::connect(Some((SERVER.to_owned(), builtin)), &servers)
             .await
             .map_err(|e| Status::failed_precondition(format!("connecting MCP servers: {e}")))?;
@@ -305,8 +389,11 @@ impl Tether for Daemon {
             kill,
             asks,
             in_progress: AtomicBool::new(true),
+            last_call: Mutex::new(Instant::now()),
+            idle_timeout,
         });
-        self.inner.activity.begin();
+        // The run now holds the activity this call began.
+        starting.1 = false;
         lock(&self.inner.runs).insert(run_id.clone(), entry);
         Ok(Response::new(proto::Run {
             run_id,
@@ -321,6 +408,8 @@ impl Tether for Daemon {
     ) -> Result<Response<proto::ModelResponse>, Status> {
         let req = request.into_inner();
         let entry = self.entry(&req.run_id)?;
+        // A call from the agent: the run is not abandoned.
+        let _call = entry.touch();
         let messages: Vec<Message> = json("messages_json", &req.messages_json)?;
         let params = json_or(
             "params_json",
@@ -391,6 +480,8 @@ impl Tether for Daemon {
     ) -> Result<Response<proto::ToolResult>, Status> {
         let req = request.into_inner();
         let entry = self.entry(&req.run_id)?;
+        // A call from the agent: the run is not abandoned.
+        let _call = entry.touch();
         let call = req
             .call
             .ok_or_else(|| Status::invalid_argument("call is missing"))?;
@@ -429,6 +520,8 @@ impl Tether for Daemon {
     ) -> Result<Response<proto::Empty>, Status> {
         let req = request.into_inner();
         let entry = self.entry(&req.run_id)?;
+        // A call from the agent: the run is not abandoned.
+        let _call = entry.touch();
         let outcome = json_or("outcome_json", &req.outcome_json, Value::Null)?;
 
         let mut guard = entry.run.lock().await;
@@ -488,6 +581,8 @@ impl Tether for Daemon {
     ) -> Result<Response<proto::Empty>, Status> {
         let req = request.into_inner();
         let entry = self.entry(&req.run_id)?;
+        // A call from the agent: the run is not abandoned.
+        let _call = entry.touch();
         let waiting = lock(&entry.asks.pending).remove(&req.subject_seq);
         let Some(waiting) = waiting else {
             return Err(Status::not_found(format!(
@@ -515,14 +610,18 @@ impl Tether for Daemon {
         entry.kill.trip(REASON);
         // With no call in flight there is no boundary coming: halt now.
         if let Ok(mut guard) = entry.run.try_lock() {
+            // A run left waiting on an ask counts: its caller went away
+            // mid-question, and without this it would wait for ever.
             if let Some(run) = guard
                 .as_mut()
-                .filter(|run| run.state() == RunState::Running)
+                .filter(|run| matches!(run.state(), RunState::Running | RunState::Suspended))
             {
-                run.halt_as_recorded(&format!("kill switch: {REASON}"), false)
-                    .await
-                    .map_err(run_error)?;
+                let halted = run
+                    .halt_as_recorded(&format!("kill switch: {REASON}"), false)
+                    .await;
+                // Over either way, also when the halt could not be written.
                 self.ended(&entry);
+                halted.map_err(run_error)?;
             }
         }
         Ok(Response::new(proto::Empty {}))

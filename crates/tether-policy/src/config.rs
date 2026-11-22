@@ -20,14 +20,14 @@
 //! transport = "stdio"
 //! command = "npx"
 //! args = ["-y", "@modelcontextprotocol/server-filesystem", "./workspace"]
-//! env = ["HOME", "PATH"]     # the only variables the child process gets
-//! timeout_secs = 60          # per call
+//! env = ["HOME"]             # what the child process gets, beside PATH
+//! timeout_secs = 60          # for the handshake and per call
 //!
 //! [[mcp_server]]
 //! id = "search"
 //! transport = "http"
 //! url = "http://127.0.0.1:8931/mcp"
-//! headers = { Authorization = "Bearer ..." }
+//! headers = { Authorization = "Bearer ${SEARCH_TOKEN}" }   # from the environment
 //! ```
 
 use serde::Deserialize;
@@ -45,6 +45,25 @@ pub struct BudgetConfig {
     pub max_tool_calls: Option<u64>,
     /// Seconds to wait for a human on `ask` before the run halts.
     pub ask_timeout_secs: Option<u64>,
+    /// Seconds a run under the daemon may go without a call from its agent
+    /// before the daemon halts it. An agent that crashed makes no more
+    /// calls; without this its run, and the servers started for it, would
+    /// stay for ever. 0 turns it off. Default
+    /// [`DEFAULT_IDLE_TIMEOUT_SECS`].
+    pub idle_timeout_secs: Option<u64>,
+}
+
+/// How long a daemon run may be idle when the policy does not say.
+pub const DEFAULT_IDLE_TIMEOUT_SECS: u64 = 600;
+
+impl BudgetConfig {
+    /// The idle time after which the daemon halts a run, or `None` for never.
+    pub fn idle_timeout(&self) -> Option<std::time::Duration> {
+        match self.idle_timeout_secs.unwrap_or(DEFAULT_IDLE_TIMEOUT_SECS) {
+            0 => None,
+            secs => Some(std::time::Duration::from_secs(secs)),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -178,6 +197,9 @@ fn invalid(rule: &str, reason: impl Into<String>) -> PolicyError {
     }
 }
 
+/// The longest pattern a rule may have.
+pub const MAX_PATTERN: usize = 1024;
+
 fn globs(rule: &str, key: &str, value: Option<OneOrMany>) -> Result<Vec<String>, PolicyError> {
     let globs = match value {
         None => return Ok(Vec::new()),
@@ -188,6 +210,14 @@ fn globs(rule: &str, key: &str, value: Option<OneOrMany>) -> Result<Vec<String>,
     // meant to match nothing.
     if globs.is_empty() || globs.iter().any(String::is_empty) {
         return Err(invalid(rule, format!("`{key}` has an empty pattern")));
+    }
+    // Matching costs pattern length times text length, and the text is the
+    // agent's to choose. No real pattern is anywhere near this long.
+    if globs.iter().any(|glob| glob.chars().count() > MAX_PATTERN) {
+        return Err(invalid(
+            rule,
+            format!("a `{key}` pattern is longer than {MAX_PATTERN} characters"),
+        ));
     }
     Ok(globs)
 }

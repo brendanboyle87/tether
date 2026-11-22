@@ -445,8 +445,25 @@ async fn bad_requests_are_refused_with_a_status_that_says_why() {
 async fn the_binary_starts_on_a_socket_exits_when_idle_and_yields_to_one_already_there() {
     let dir = tempfile::tempdir().expect("tempdir");
     let socket = dir.path().join("d.sock");
-    // A leftover socket file from a daemon that died is replaced.
-    std::fs::write(&socket, "").expect("stale file");
+    // A file that is not a socket is somebody's file: the daemon leaves it
+    // where it is and does not start.
+    let not_a_socket = dir.path().join("notes.txt");
+    std::fs::write(&not_a_socket, "keep me").expect("a file");
+    let refused = std::process::Command::new(env!("CARGO_BIN_EXE_tetherd"))
+        .arg("--socket")
+        .arg(&not_a_socket)
+        .args(["--idle-secs", "1"])
+        .output()
+        .expect("run tetherd");
+    assert!(!refused.status.success());
+    assert_eq!(
+        std::fs::read_to_string(&not_a_socket).expect("still there"),
+        "keep me"
+    );
+
+    // A leftover socket from a daemon that died is replaced.
+    drop(std::os::unix::net::UnixListener::bind(&socket).expect("a stale socket"));
+    assert!(socket.exists());
 
     let start = |idle: &str| {
         std::process::Command::new(env!("CARGO_BIN_EXE_tetherd"))
@@ -490,4 +507,47 @@ async fn the_binary_starts_on_a_socket_exits_when_idle_and_yields_to_one_already
     .expect("wait");
     assert!(exited.success());
     assert!(!socket.exists());
+}
+
+#[tokio::test]
+async fn a_run_whose_agent_goes_quiet_is_halted_and_the_daemon_can_leave() {
+    let (served, mut client) = serve(Duration::from_millis(400)).await;
+    // One second without a call is enough to call a run abandoned here.
+    std::fs::write(
+        served.path("tether.toml"),
+        format!("[budget]\nidle_timeout_secs = 1\n{POLICY}"),
+    )
+    .expect("write policy");
+
+    let run = client
+        .create_run(create(&served))
+        .await
+        .expect("create")
+        .into_inner();
+    // The agent asks the model once, then is never heard from again: it
+    // crashed, or was killed. No Finish, no Halt.
+    client
+        .complete(ask(&run, json!([user("go")])))
+        .await
+        .expect("complete");
+
+    // The daemon notices, records why, and with nothing left in progress
+    // goes away by itself.
+    tokio::time::timeout(Duration::from_secs(20), served.daemon)
+        .await
+        .expect("the daemon never became idle")
+        .expect("join")
+        .expect("serve");
+
+    let trace = std::fs::read_to_string(&run.trace_path).expect("read trace");
+    let last: Value = serde_json::from_str(trace.lines().last().expect("events")).expect("event");
+    assert_eq!(last["type"], "run.state");
+    assert_eq!(last["data"]["state"], "halted");
+    assert!(
+        last["data"]["reason"]
+            .as_str()
+            .expect("reason")
+            .contains("no call from the agent for 1 s"),
+        "{last}"
+    );
 }

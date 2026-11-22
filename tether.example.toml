@@ -10,6 +10,11 @@ max_tool_calls = 400
 # Seconds to wait for a human on "ask" before the run moves to Halted.
 ask_timeout_secs = 600
 
+# Under the daemon (an agent using an SDK): seconds a run may go without a
+# call from its agent before it is halted as abandoned. An agent that crashed
+# makes no more calls. 0 turns this off.
+idle_timeout_secs = 600
+
 # A rule matches when every key in its `match` does. `tool` is the qualified
 # name, <server>.<tool>; `argv0` is the command's file name; `path` is the
 # call's `path` argument. Each takes a glob or a list of globs. `name` is what
@@ -41,11 +46,14 @@ reason = "no network in this run"
 # transport = "stdio"
 # command = "npx"
 # args = ["-y", "@modelcontextprotocol/server-filesystem", "./workspace"]
-# env = ["PATH", "HOME"]
-# timeout_secs = 60
+# env = ["HOME"]          # passed to the server beside PATH; nothing else is
+# timeout_secs = 60       # for the handshake and for each call
+#
+# This file is recorded whole in every trace, so never write a token in it.
+# A header value takes ${NAME}, filled in from the environment at run start.
 #
 # [[mcp_server]]
 # id = "search"
 # transport = "http"
 # url = "http://127.0.0.1:8931/mcp"
-# headers = { Authorization = "Bearer ..." }
+# headers = { Authorization = "Bearer ${SEARCH_TOKEN}" }
